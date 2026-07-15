@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.24;
+pragma solidity ^0.8.30;
 
 import {Script} from "forge-std/Script.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
@@ -7,7 +7,6 @@ import {RewardVault} from "../src/RewardVault.sol";
 
 contract DeployRewardVault is Script {
     function run() external returns (address proxyAddress) {
-
         address admin = vm.envAddress("ADMIN_ADDRESS");
         address signer = vm.envAddress("SIGNER_ADDRESS");
         address upgrader = vm.envAddress("UPGRADER_ADDRESS");
