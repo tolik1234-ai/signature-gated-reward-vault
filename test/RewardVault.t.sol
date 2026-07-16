@@ -151,24 +151,22 @@ contract RewardVaultTest is Test {
     }
 
     function test_RevertWhen_ZeroAddressInInitialize() public {
-        // Тут нельзя переиспользовать vault из setUp — он уже инициализирован.
-        // Разверни НОВУЮ пару implementation + proxy (как в setUp), но с token = address(0).
-        // TODO 1: RewardVault newImpl = new RewardVault();
-        // TODO 2: bytes memory badInitData = abi.encodeCall(RewardVault.initialize, (admin, signer, upgrader, address(0)));
-        // TODO 3: vm.expectRevert(RewardVault.InputAddressCantBeZero.selector);
-        // TODO 4: new ERC1967Proxy(address(newImpl), badInitData);
-        //         (сам вызов new и должен упасть — initialize реветит внутри delegatecall,
-        //          а он выполняется прямо в конструкторе ERC1967Proxy)
+        RewardVault newImpl = new RewardVault();
+        bytes memory badInitData = abi.encodeCall(RewardVault.initialize, (admin, signer, upgrader, address(0)));
+        vm.expectRevert(RewardVault.InputAddressCantBeZero.selector);
+        new ERC1967Proxy(address(newImpl), badInitData);
     }
 
     function test_RevertWhen_NonUpgraderCallsUpgrade() public {
         address attacker = makeAddr("attacker");
 
-        // TODO 1: vm.prank(attacker)
-        // TODO 2: vm.expectRevert(abi.encodeWithSelector(
-        //             IAccessControl.AccessControlUnauthorizedAccount.selector, attacker, vault.UPGRADER_ROLE()))
-        //         (порядок вызова expectRevert/prank — подумай, что должно идти раньше)
-        // TODO 3: vault.upgradeToAndCall(address(0xdead), "") — адрес неважен, до проверки реализации дело не дойдёт
+        vm.prank(attacker);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector, attacker, vault.UPGRADER_ROLE()
+            )
+        );
+        vault.upgradeToAndCall(address(0xdead), "");
     }
 
     function _signClaim(RewardVault.ClaimRequest memory req, uint256 privateKey)
