@@ -7,6 +7,7 @@ import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol"
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {RewardVault} from "../src/RewardVault.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
+import {RewardVaultV2} from "./mocks/RewardVaultV2.sol";
 
 contract RewardVaultTest is Test {
     bytes32 constant EIP712_DOMAIN_TYPEHASH =
@@ -53,7 +54,6 @@ contract RewardVaultTest is Test {
         RewardVault.ClaimRequest memory req =
             RewardVault.ClaimRequest({account: user, amount: amount, nonce: nonce, deadline: deadline});
 
-        // TODO 1: structHash = keccak256(abi.encode(
         bytes32 structHash =
             keccak256(abi.encode(vault.CLAIM_REQUEST_TYPEHASH(), req.account, req.amount, req.nonce, req.deadline));
 
@@ -89,16 +89,12 @@ contract RewardVaultTest is Test {
         });
         bytes memory signature = _signClaim(req, signerPrivateKey);
 
-        // TODO: vm.warp — перемотать время так, чтобы req.deadline оказался в прошлом
         vm.warp(2 hours);
-        // TODO: vm.expectRevert (какой вариант? аргументы есть — подумай, какой из способов выше подходит)
         vm.expectPartialRevert(RewardVault.DeadlineWasReached.selector);
-        // TODO: vault.claim(req, signature)
         vault.claim(req, signature);
     }
 
     function test_RevertWhen_NonceMismatch() public {
-        // TODO: собери req с заведомо неверным nonce, подпиши, ожидай NoncesInStorageAndTransactionWasMismatch
         RewardVault.ClaimRequest memory req = RewardVault.ClaimRequest({
             account: makeAddr("user"), amount: 10 * 10 ** 18, nonce: 1, deadline: block.timestamp + 1 hours
         });
@@ -109,7 +105,6 @@ contract RewardVaultTest is Test {
     }
 
     function test_RevertWhen_SignerLacksRole() public {
-        // TODO: собери валидный req, подпиши ключом БЕЗ SIGNER_ROLE, ожидай SignerHasNotSignerRole
         RewardVault.ClaimRequest memory req = RewardVault.ClaimRequest({
             account: makeAddr("user"), amount: 10 * 10 ** 18, nonce: 0, deadline: block.timestamp + 1 hours
         });
@@ -120,7 +115,6 @@ contract RewardVaultTest is Test {
     }
 
     function test_RevertWhen_InsufficientVaultBalance() public {
-        // TODO: собери req с amount больше баланса vault, ожидай NotEnoughTokenInContract
         RewardVault.ClaimRequest memory req = RewardVault.ClaimRequest({
             account: makeAddr("user"), amount: 1000 * 10 ** 18 + 1, nonce: 0, deadline: block.timestamp + 1 hours
         });
@@ -131,7 +125,6 @@ contract RewardVaultTest is Test {
     }
 
     function test_RevertWhen_SignatureReplayed() public {
-        // TODO: сделай один успешный claim (как в happy path тесте)
         RewardVault.ClaimRequest memory req = RewardVault.ClaimRequest({
             account: makeAddr("user"), amount: 10 * 10 ** 18, nonce: 0, deadline: block.timestamp + 1 hours
         });
@@ -144,8 +137,6 @@ contract RewardVaultTest is Test {
     }
 
     function test_RevertWhen_InitializeCalledTwice() public {
-        // TODO: vault уже инициализирован в setUp — просто вызови vault.initialize(...) ещё раз
-        //       с любыми валидными адресами, ожидай RewardVault.InvalidInitialization.selector
         vm.expectRevert(Initializable.InvalidInitialization.selector);
         vault.initialize(admin, signer, upgrader, address(token));
     }
@@ -159,14 +150,51 @@ contract RewardVaultTest is Test {
 
     function test_RevertWhen_NonUpgraderCallsUpgrade() public {
         address attacker = makeAddr("attacker");
+        bytes32 upgraderRole = vault.UPGRADER_ROLE();
 
         vm.prank(attacker);
         vm.expectRevert(
-            abi.encodeWithSelector(
-                IAccessControl.AccessControlUnauthorizedAccount.selector, attacker, vault.UPGRADER_ROLE()
-            )
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, attacker, upgraderRole)
         );
         vault.upgradeToAndCall(address(0xdead), "");
+    }
+
+    function test_UpgradeByUpgraderSucceedsAndPreservesState() public {
+        RewardVaultV2 newImpl = new RewardVaultV2();
+
+        vm.prank(upgrader);
+        vault.upgradeToAndCall(address(newImpl), "");
+
+        RewardVaultV2 vaultV2 = RewardVaultV2(address(vault));
+
+        assertEq(vaultV2.version(), "v2");
+
+        assertTrue(vault.hasRole(vault.DEFAULT_ADMIN_ROLE(), admin));
+        assertTrue(vault.hasRole(vault.SIGNER_ROLE(), signer));
+        assertTrue(vault.hasRole(vault.UPGRADER_ROLE(), upgrader));
+
+        assertEq(address(vaultV2.token()), address(token));
+    }
+
+    function test_ClaimStillWorksAfterUpgrade() public {
+        RewardVault.ClaimRequest memory req = RewardVault.ClaimRequest({
+            account: makeAddr("user"), amount: 10 * 10 ** 18, nonce: 0, deadline: block.timestamp + 1 hours
+        });
+        bytes memory signature = _signClaim(req, signerPrivateKey);
+        vault.claim(req, signature);
+
+        RewardVaultV2 newImpl = new RewardVaultV2();
+        vm.prank(upgrader);
+        vault.upgradeToAndCall(address(newImpl), "");
+
+        RewardVault.ClaimRequest memory req2 = RewardVault.ClaimRequest({
+            account: makeAddr("user"), amount: 10 * 10 ** 18, nonce: 1, deadline: block.timestamp + 1 hours
+        });
+        bytes memory signature2 = _signClaim(req2, signerPrivateKey);
+
+        vault.claim(req2, signature2);
+
+        assertEq(vault.userNonces(makeAddr("user")), 2);
     }
 
     function _signClaim(RewardVault.ClaimRequest memory req, uint256 privateKey)
